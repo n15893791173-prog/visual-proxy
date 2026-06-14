@@ -7,6 +7,9 @@
 | `VISION_API_KEY` | ✓ | - | API 密钥 |
 | `VISION_API_BASE` | ✗ | `https://api.openai.com/v1` | API 端点 |
 | `VISION_MODEL` | ✗ | `gpt-4o` | 模型名称 |
+| `VISION_MAX_TOKENS` | ✗ | `2000` | 最大输出 token 数 |
+| `VISION_CACHE_MAX_ENTRIES` | ✗ | `100` | 缓存最多保留图片数 |
+| `VISION_CACHE_TTL_DAYS` | ✗ | `30` | 缓存过期天数 |
 
 脚本会自动检测端点类型：
 - 端点含 `anthropic` → 使用 Anthropic Messages API 格式
@@ -48,15 +51,30 @@ export VISION_MODEL="your-model"
 
 ## 缓存
 
-缓存文件位于 `scripts/cache.json`，以图片路径的 SHA256 作为 key，值为问答对数组：
+缓存文件位于 `scripts/cache.json`，结构如下：
 ```json
 {
-  "abc123...": [
-    {"q": "描述这张图片", "a": "这是一张..."},
-    {"q": "图中人名有哪些", "a": "墨子、庄子..."}
-  ]
+  "abc123...": {
+    "updated": 1718400000,
+    "pairs": [
+      {"q": "描述这张图片", "a": "这是一张..."},
+      {"q": "图中人名有哪些", "a": "墨子、庄子..."}
+    ]
+  }
 }
 ```
-同一张图可累积多个问答对，追加不会覆盖。`--force` 会清除该图片的所有缓存。
+
+### 自动清理
+
+每次写入缓存时自动触发：
+- **过期清理：** 超过 `VISION_CACHE_TTL_DAYS`（默认 30 天）未使用的条目自动删除
+- **数量清理：** 超过 `VISION_CACHE_MAX_ENTRIES`（默认 100 张）时，删除最旧的
+
+### 手动清理
+
+```bash
+python vision.py --prune   # 立即执行过期/超量清理
+python vision.py --list    # 查看所有缓存及最后更新时间
+```
 
 如需完全清除缓存，删除 `scripts/cache.json` 即可。

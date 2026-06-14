@@ -35,7 +35,10 @@ def get_config():
     base = os.environ.get("VISION_API_BASE", "https://api.openai.com/v1").rstrip("/")
     model = os.environ.get("VISION_MODEL", "gpt-4o")
     max_tokens = int(os.environ.get("VISION_MAX_TOKENS", "2000"))
-    return {"api_key": key, "api_base": base, "model": model, "max_tokens": max_tokens}
+    cache_max = int(os.environ.get("VISION_CACHE_MAX_ENTRIES", "100"))
+    cache_ttl = int(os.environ.get("VISION_CACHE_TTL_DAYS", "30"))
+    return {"api_key": key, "api_base": base, "model": model,
+            "max_tokens": max_tokens, "cache_max": cache_max, "cache_ttl": cache_ttl}
 
 
 # ── 缓存层 ────────────────────────────────────────────────
@@ -55,14 +58,26 @@ def save_cache(cache: dict):
 
 def lookup_qa_pairs(image: str) -> List[dict]:
     """返回该图片的所有已缓存问答对 [{q, a}, ...]。"""
-    return load_cache().get(_cache_key(image), [])
+    entry = load_cache().get(_cache_key(image))
+    if entry:
+        return entry.get("pairs", [])
+    return []
+
+def _entry_pairs(entry: dict) -> List[dict]:
+    """兼容旧缓存格式（直接是数组）和新格式（{updated, pairs}）。"""
+    if isinstance(entry, list):
+        return entry
+    return entry.get("pairs", [])
 
 def append_qa(image: str, question: str, answer: str):
     cache = load_cache()
     key = _cache_key(image)
-    if key not in cache:
-        cache[key] = []
-    cache[key].append({"q": question, "a": answer})
+    if key not in cache or isinstance(cache[key], list):
+        cache[key] = {"updated": time.time(), "pairs": _entry_pairs(cache.get(key, []))}
+    else:
+        cache[key]["updated"] = time.time()
+    cache[key]["pairs"].append({"q": question, "a": answer})
+    _auto_prune(cache)
     save_cache(cache)
 
 def clear_image_cache(image: str):
@@ -75,10 +90,32 @@ def remove_qa(image: str, question: str):
     cache = load_cache()
     key = _cache_key(image)
     if key in cache:
-        cache[key] = [p for p in cache[key] if p["q"] != question]
-        if not cache[key]:
+        pairs = _entry_pairs(cache[key])
+        cache[key]["pairs"] = [p for p in pairs if p["q"] != question]
+        if not cache[key]["pairs"]:
             del cache[key]
         save_cache(cache)
+
+def _auto_prune(cache: dict):
+    """按 TTL 和最大条目数自动清理缓存。"""
+    cfg = get_config()
+    ttl_seconds = cfg["cache_ttl"] * 86400
+    max_entries = cfg["cache_max"]
+    now = time.time()
+
+    # 1. 删除过期条目
+    expired = [k for k, v in cache.items()
+               if isinstance(v, dict) and now - v.get("updated", 0) > ttl_seconds]
+    for k in expired:
+        del cache[k]
+
+    # 2. 超过最大条目数时，删除最旧的
+    entries = [(k, v.get("updated", 0) if isinstance(v, dict) else 0)
+               for k, v in cache.items()]
+    entries.sort(key=lambda x: x[1])
+    while len(entries) > max_entries:
+        del cache[entries[0][0]]
+        entries.pop(0)
 
 
 # ── 图片处理 ──────────────────────────────────────────────
@@ -213,19 +250,23 @@ def cmd_check():
 
 def cmd_lookup(image: str):
     """输出该图片所有已缓存问题（不含回答全文）。"""
-    pairs = lookup_qa_pairs(image)
-    if pairs:
-        summary = [{"q": p["q"], "a_len": len(p["a"])} for p in pairs]
-        print(json.dumps(summary, ensure_ascii=False, indent=2))
-    else:
+    cache = load_cache()
+    entry = cache.get(_cache_key(image))
+    if not entry:
         sys.exit(1)
+    pairs = _entry_pairs(entry)
+    summary = [{"q": p["q"], "a_len": len(p["a"])} for p in pairs]
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
 
 def cmd_read(image: str, index: int):
     """读取指定索引的缓存回答全文。——read 直接接图片路径，不需要 --lookup。"""
-    pairs = lookup_qa_pairs(image)
-    if not pairs:
+    cache = load_cache()
+    entry = cache.get(_cache_key(image))
+    if not entry:
         print("错误: 该图片无缓存", file=sys.stderr)
         sys.exit(1)
+    pairs = _entry_pairs(entry)
+
     if 0 <= index < len(pairs):
         print(pairs[index]["a"])
     else:
@@ -238,9 +279,25 @@ def cmd_list():
     if not cache:
         print("(空)")
         return
-    for key_hash, pairs in cache.items():
-        questions = [p["q"][:50] for p in pairs]
-        print(f"{key_hash[:12]}  {len(pairs)} 条  {questions}")
+    entries = []
+    for key_hash, entry in cache.items():
+        pairs = _entry_pairs(entry)
+        ts = entry.get("updated", 0) if isinstance(entry, dict) else 0
+        when = time.strftime("%Y-%m-%d", time.localtime(ts)) if ts else "未知"
+        questions = [p["q"][:40] for p in pairs]
+        entries.append((ts, key_hash, len(pairs), when, questions))
+    entries.sort(reverse=True)
+    for ts, h, n, when, qs in entries:
+        print(f"{h[:12]}  {n} 条  {when}  {qs}")
+
+def cmd_prune():
+    """手动清理过期和超量缓存。"""
+    cache = load_cache()
+    before = len(cache)
+    _auto_prune(cache)
+    save_cache(cache)
+    after = len(cache)
+    print(f"清理完成: {before} → {after} 张图片")
 
 def cmd_image(image: str, question: str, force: bool = False, clear: str = None):
     """识别图片并缓存。"""
@@ -271,6 +328,7 @@ def main():
     parser.add_argument("--read", metavar="图片路径", help="--read <图片路径> --index <N>  读取第 N 条缓存回答全文")
     parser.add_argument("--index", type=int, default=0, help="配合 --read 指定读取第几条")
     parser.add_argument("--list", action="store_true", help="列出所有已缓存图片")
+    parser.add_argument("--prune", action="store_true", help="手动清理过期和超量缓存")
     parser.add_argument("--force", action="store_true", help="清除该图片所有旧缓存，重新识别")
     parser.add_argument("--clear", default=None, help="只删除匹配此问题的旧缓存，然后重新识别")
     parser.add_argument("--check", action="store_true", help="验证配置是否就绪")
@@ -280,6 +338,8 @@ def main():
         cmd_check()
     elif args.list:
         cmd_list()
+    elif args.prune:
+        cmd_prune()
     elif args.read:
         cmd_read(args.read, args.index)
     elif args.lookup:

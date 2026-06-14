@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import sys
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -33,7 +34,8 @@ def get_config():
     key = os.environ.get("VISION_API_KEY", "")
     base = os.environ.get("VISION_API_BASE", "https://api.openai.com/v1").rstrip("/")
     model = os.environ.get("VISION_MODEL", "gpt-4o")
-    return {"api_key": key, "api_base": base, "model": model}
+    max_tokens = int(os.environ.get("VISION_MAX_TOKENS", "2000"))
+    return {"api_key": key, "api_base": base, "model": model, "max_tokens": max_tokens}
 
 
 # ── 缓存层 ────────────────────────────────────────────────
@@ -116,16 +118,17 @@ def call_api(image: str, question: str, config: dict) -> str:
     else:
         b64, mime = _read_local_b64(image)
 
+    max_tokens = config["max_tokens"]
     if "anthropic" in api_base.lower():
-        return _call_anthropic(api_base, api_key, model, b64, mime, question)
+        return _call_anthropic(api_base, api_key, model, b64, mime, question, max_tokens)
     else:
-        return _call_openai(api_base, api_key, model, b64, mime, question)
+        return _call_openai(api_base, api_key, model, b64, mime, question, max_tokens)
 
 
-def _call_openai(base: str, key: str, model: str, b64: str, mime: str, question: str) -> str:
+def _call_openai(base: str, key: str, model: str, b64: str, mime: str, question: str, max_tokens: int) -> str:
     payload = {
         "model": model,
-        "max_tokens": 2000,
+        "max_tokens": max_tokens,
         "messages": [{
             "role": "user",
             "content": [
@@ -142,10 +145,10 @@ def _call_openai(base: str, key: str, model: str, b64: str, mime: str, question:
         raise RuntimeError(f"无法解析 OpenAI 响应: {json.dumps(result, ensure_ascii=False)}")
 
 
-def _call_anthropic(base: str, key: str, model: str, b64: str, mime: str, question: str) -> str:
+def _call_anthropic(base: str, key: str, model: str, b64: str, mime: str, question: str, max_tokens: int) -> str:
     payload = {
         "model": model,
-        "max_tokens": 2000,
+        "max_tokens": max_tokens,
         "messages": [{
             "role": "user",
             "content": [
@@ -163,7 +166,8 @@ def _call_anthropic(base: str, key: str, model: str, b64: str, mime: str, questi
         raise RuntimeError(f"无法解析 Anthropic 响应: {json.dumps(result, ensure_ascii=False)}")
 
 
-def _http_post(url: str, key: str, payload: dict, extra_headers: dict = None) -> dict:
+def _http_post(url: str, key: str, payload: dict, extra_headers: dict = None,
+               max_retries: int = 3) -> dict:
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {key}",
@@ -171,15 +175,28 @@ def _http_post(url: str, key: str, payload: dict, extra_headers: dict = None) ->
     if extra_headers:
         headers.update(extra_headers)
     body = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(url, data=body, headers=headers)
-    try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        err_body = e.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"API 请求失败 (HTTP {e.code}): {err_body}")
-    except urllib.error.URLError as e:
-        raise RuntimeError(f"网络错误: {e.reason}")
+
+    last_error = None
+    for attempt in range(max_retries + 1):
+        req = urllib.request.Request(url, data=body, headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            err_body = e.read().decode("utf-8", errors="replace")
+            if e.code in (429, 503) and attempt < max_retries:
+                wait = 2 ** attempt
+                time.sleep(wait)
+                last_error = e
+                continue
+            raise RuntimeError(f"API 请求失败 (HTTP {e.code}): {err_body}")
+        except urllib.error.URLError as e:
+            if attempt < max_retries:
+                time.sleep(2 ** attempt)
+                last_error = e
+                continue
+            raise RuntimeError(f"网络错误: {e.reason}")
+    raise RuntimeError(f"重试 {max_retries} 次后仍失败: {last_error}")
 
 
 # ── CLI ────────────────────────────────────────────────────
@@ -190,11 +207,12 @@ def cmd_check():
         print("错误: 未配置 VISION_API_KEY 环境变量", file=sys.stderr)
         sys.exit(1)
     print("[OK] 配置正常")
-    print(f"  API Base: {config['api_base']}")
-    print(f"  Model:    {config['model']}")
+    print(f"  API Base:   {config['api_base']}")
+    print(f"  Model:      {config['model']}")
+    print(f"  Max Tokens: {config['max_tokens']}")
 
 def cmd_lookup(image: str):
-    """输出该图片所有已缓存问题（不含回答全文），供大模型判断匹配度。"""
+    """输出该图片所有已缓存问题（不含回答全文）。"""
     pairs = lookup_qa_pairs(image)
     if pairs:
         summary = [{"q": p["q"], "a_len": len(p["a"])} for p in pairs]
@@ -203,19 +221,29 @@ def cmd_lookup(image: str):
         sys.exit(1)
 
 def cmd_read(image: str, index: int):
-    """读取指定索引的缓存回答全文。"""
+    """读取指定索引的缓存回答全文。——read 直接接图片路径，不需要 --lookup。"""
     pairs = lookup_qa_pairs(image)
-    if pairs and 0 <= index < len(pairs):
+    if not pairs:
+        print("错误: 该图片无缓存", file=sys.stderr)
+        sys.exit(1)
+    if 0 <= index < len(pairs):
         print(pairs[index]["a"])
     else:
         print(f"错误: 索引 {index} 超出范围（共 {len(pairs)} 条）", file=sys.stderr)
         sys.exit(1)
 
+def cmd_list():
+    """列出所有已缓存图片及问答数量。"""
+    cache = load_cache()
+    if not cache:
+        print("(空)")
+        return
+    for key_hash, pairs in cache.items():
+        questions = [p["q"][:50] for p in pairs]
+        print(f"{key_hash[:12]}  {len(pairs)} 条  {questions}")
+
 def cmd_image(image: str, question: str, force: bool = False, clear: str = None):
-    """识别图片并缓存。
-    force=True: 清空该图片所有旧缓存。
-    clear="旧问题": 只删除匹配该问题的单个问答对。
-    """
+    """识别图片并缓存。"""
     if force:
         clear_image_cache(image)
     elif clear:
@@ -240,7 +268,9 @@ def main():
     parser.add_argument("--image", help="图片路径或 URL")
     parser.add_argument("--question", default="请详细描述这张图片的内容。", help="对图片的提问")
     parser.add_argument("--lookup", help="列出该图片所有已缓存问题（不含回答全文）")
-    parser.add_argument("--read", type=int, default=None, help="读取指定索引的缓存回答全文（需配合 --lookup 使用）")
+    parser.add_argument("--read", metavar="图片路径", help="--read <图片路径> --index <N>  读取第 N 条缓存回答全文")
+    parser.add_argument("--index", type=int, default=0, help="配合 --read 指定读取第几条")
+    parser.add_argument("--list", action="store_true", help="列出所有已缓存图片")
     parser.add_argument("--force", action="store_true", help="清除该图片所有旧缓存，重新识别")
     parser.add_argument("--clear", default=None, help="只删除匹配此问题的旧缓存，然后重新识别")
     parser.add_argument("--check", action="store_true", help="验证配置是否就绪")
@@ -248,12 +278,10 @@ def main():
 
     if args.check:
         cmd_check()
-    elif args.read is not None:
-        if args.lookup:
-            cmd_read(args.lookup, args.read)
-        else:
-            print("错误: --read 需要配合 --lookup <图片路径> 使用", file=sys.stderr)
-            sys.exit(1)
+    elif args.list:
+        cmd_list()
+    elif args.read:
+        cmd_read(args.read, args.index)
     elif args.lookup:
         cmd_lookup(args.lookup)
     elif args.image:

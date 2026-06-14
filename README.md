@@ -8,8 +8,8 @@
 
 ```bash
 git clone https://github.com/n15893791173-prog/visual-proxy.git /tmp/visual-proxy
-mkdir -p ~/.claude/skills
-cp -r /tmp/visual-proxy/visual-proxy/* ~/.claude/skills/visual-proxy/
+mkdir -p ~/.claude/skills/visual-proxy
+cp -r /tmp/visual-proxy/* ~/.claude/skills/visual-proxy/
 ```
 
 然后修改 `~/.claude/skills/visual-proxy/SKILL.md`，把所有 `.claude/skills/visual-proxy` 替换为 `~/.claude/skills/visual-proxy`。
@@ -19,8 +19,8 @@ cp -r /tmp/visual-proxy/visual-proxy/* ~/.claude/skills/visual-proxy/
 ```bash
 cd your-project
 git clone https://github.com/n15893791173-prog/visual-proxy.git /tmp/visual-proxy
-mkdir -p .claude/skills
-cp -r /tmp/visual-proxy/visual-proxy/* .claude/skills/visual-proxy/
+mkdir -p .claude/skills/visual-proxy
+cp -r /tmp/visual-proxy/* .claude/skills/visual-proxy/
 ```
 
 项目级安装无需修改路径，直接可用。
@@ -70,7 +70,7 @@ cp -r /tmp/visual-proxy/visual-proxy/* .claude/skills/visual-proxy/
 │  用户问"有哪些哲学家"                       │
 │  缓存里有"图中人名" → 命中！                 │
 │                                           │
-│  → vision.py --lookup <图> --read 1       │
+│  → vision.py --read <图> --index 1        │
 │  → 读取该条回答全文                         │
 │  → 直接用它回答用户，不调 API ✓              │
 │                                           │
@@ -97,7 +97,8 @@ cp -r /tmp/visual-proxy/visual-proxy/* .claude/skills/visual-proxy/
 |------|------|
 | `--check` | 验证环境变量配置是否就绪 |
 | `--lookup <图>` | 列出该图片所有已缓存问题摘要（不含全文） |
-| `--lookup <图> --read <N>` | 读取第 N 条缓存的回答全文 |
+| `--read <图> --index <N>` | 读取第 N 条缓存的回答全文 |
+| `--list` | 列出所有已缓存图片及问答数量 |
 | `--image <图> --question "问题"` | 识图并追加到缓存 |
 | `--image <图> --question "问题" --clear "旧问题"` | 删掉某条答错的缓存，重新识别 |
 | `--image <图> --question "问题" --force` | 清空该图全部缓存，重新识别 |

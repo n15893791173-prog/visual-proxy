@@ -27,7 +27,7 @@ python .claude/skills/visual-proxy/scripts/vision.py --lookup <图片路径>
 对比用户需求与缓存中的问题列表：
 - **有匹配** → 读取全文并回答：
   ```
-  python .claude/skills/visual-proxy/scripts/vision.py --lookup <图片路径> --read <索引>
+  python .claude/skills/visual-proxy/scripts/vision.py --read <图片路径> --index <索引>
   ```
 - **不匹配** → 进入步骤 3
 

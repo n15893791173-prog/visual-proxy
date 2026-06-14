@@ -4,15 +4,26 @@
 
 ## 安装
 
-```bash
-git clone https://github.com/<your-repo>/visual-proxy.git
-cp -r visual-proxy/.claude/skills/visual-proxy ~/your-project/.claude/skills/
+### 方式一：全局安装（推荐，所有项目可用）
 
-# 或者直接在项目里
-cd your-project
-mkdir -p .claude/skills
-cp -r <path-to>/visual-proxy .claude/skills/
+```bash
+git clone https://github.com/n15893791173-prog/visual-proxy.git /tmp/visual-proxy
+mkdir -p ~/.claude/skills
+cp -r /tmp/visual-proxy/visual-proxy/* ~/.claude/skills/visual-proxy/
 ```
+
+然后修改 `~/.claude/skills/visual-proxy/SKILL.md`，把所有 `.claude/skills/visual-proxy` 替换为 `~/.claude/skills/visual-proxy`。
+
+### 方式二：项目级安装（仅当前项目）
+
+```bash
+cd your-project
+git clone https://github.com/n15893791173-prog/visual-proxy.git /tmp/visual-proxy
+mkdir -p .claude/skills
+cp -r /tmp/visual-proxy/visual-proxy/* .claude/skills/visual-proxy/
+```
+
+项目级安装无需修改路径，直接可用。
 
 ## 配置
 

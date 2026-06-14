@@ -7,7 +7,7 @@ description: 视觉能力外挂 — 把图片发给视觉 LLM 获取文字描述
 
 你没有视觉能力。遇到用户发图片时，调用外部的视觉 LLM 替你看图，拿回文字描述后再回答用户。
 
-> 首次使用前，先执行 `python ~/.claude/skills/visual-proxy/scripts/vision.py --check` 确认配置就绪。
+> 首次使用前，先执行 `python .claude/skills/visual-proxy/scripts/vision.py --check` 确认配置就绪。
 
 ## 工作流
 
@@ -15,7 +15,7 @@ description: 视觉能力外挂 — 把图片发给视觉 LLM 获取文字描述
 
 **1. 查缓存**
 ```
-python ~/.claude/skills/visual-proxy/scripts/vision.py --lookup <图片路径>
+python .claude/skills/visual-proxy/scripts/vision.py --lookup <图片路径>
 ```
 返回该图片所有已缓存问题摘要：
 ```json
@@ -27,14 +27,14 @@ python ~/.claude/skills/visual-proxy/scripts/vision.py --lookup <图片路径>
 对比用户需求与缓存中的问题列表：
 - **有匹配** → 读取全文并回答：
   ```
-  python ~/.claude/skills/visual-proxy/scripts/vision.py --read <图片路径> --index <索引>
+  python .claude/skills/visual-proxy/scripts/vision.py --read <图片路径> --index <索引>
   ```
 - **不匹配** → 进入步骤 3
 
 **3. 生成精准提示词并识别**
 根据用户需求自拟一个精准的中文问题，执行：
 ```
-python ~/.claude/skills/visual-proxy/scripts/vision.py --image <图片路径> --question "你的问题"
+python .claude/skills/visual-proxy/scripts/vision.py --image <图片路径> --question "你的问题"
 ```
 结果自动追加到缓存。
 

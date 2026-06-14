@@ -3,7 +3,7 @@
 
 纯标准库实现，不依赖第三方包。
 支持本地路径和 HTTP(S) URL。
-缓存结构：{image_hash: [{q: ..., a: ...}]}，同一张图可缓存多个问答对。
+缓存结构：{image_hash: {updated: timestamp, pairs: [{q, a}]}}，同一张图可累积多个问答对。
 """
 
 import argparse
@@ -140,6 +140,8 @@ def _fetch_url_b64(url: str) -> Tuple[str, str]:
     with urllib.request.urlopen(req, timeout=30) as resp:
         data = resp.read()
     mime = resp.headers.get("Content-Type", "image/png")
+    # 剥离 charset 等参数，只保留纯 MIME 类型（如 "image/png; charset=utf-8" → "image/png"）
+    mime = mime.split(";")[0].strip()
     return base64.standard_b64encode(data).decode("ascii"), mime
 
 
@@ -224,13 +226,13 @@ def _http_post(url: str, key: str, payload: dict, extra_headers: dict = None,
             if e.code in (429, 503) and attempt < max_retries:
                 wait = 2 ** attempt
                 time.sleep(wait)
-                last_error = e
+                last_error = f"HTTP {e.code}: {err_body}"
                 continue
             raise RuntimeError(f"API 请求失败 (HTTP {e.code}): {err_body}")
         except urllib.error.URLError as e:
             if attempt < max_retries:
                 time.sleep(2 ** attempt)
-                last_error = e
+                last_error = f"网络错误: {e.reason}"
                 continue
             raise RuntimeError(f"网络错误: {e.reason}")
     raise RuntimeError(f"重试 {max_retries} 次后仍失败: {last_error}")

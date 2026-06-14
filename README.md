@@ -1,6 +1,14 @@
 # visual-proxy
 
+[![GitHub stars](https://img.shields.io/github/stars/n15893791173-prog/visual-proxy?style=flat-square)](https://github.com/n15893791173-prog/visual-proxy/stargazers)
+[![GitHub license](https://img.shields.io/github/license/n15893791173-prog/visual-proxy?style=flat-square)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.9%2B-blue?style=flat-square)](https://www.python.org/)
+[![Zero dependencies](https://img.shields.io/badge/dependencies-zero-brightgreen?style=flat-square)](scripts/vision.py)
+[![Claude Code Skill](https://img.shields.io/badge/claude--code-skill-orange?style=flat-square)](https://docs.anthropic.com/en/docs/claude-code)
+
 给没有视觉能力的底层模型（DeepSeek、o1、o3 等）外挂看图能力。通过调用可配置的视觉 LLM 把图片转成文字描述。
+
+> Vision proxy for text-only LLMs — supports OpenAI / Anthropic / DashScope / Qwen3-VL and any OpenAI-compatible endpoint.
 
 ## 安装
 
